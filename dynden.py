@@ -12,6 +12,8 @@ import numpy.ma as ma
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+from matplotlib.colors import BoundaryNorm
+from matplotlib.ticker import MaxNLocator
 
 import MDAnalysis as MDA
 from MDAnalysis.analysis.lineardensity import LinearDensity
@@ -463,14 +465,10 @@ axes = np.arange(b[0])
 #time series for z-box evolution as well as its running average
 # (over 100 frames, unless simulation has very little frames)
 thistime = tsteps*timestep/1000.0
+# Set the window size to 0.1% of the length of the box size array
+fraction = 0.0098
+N = int(len(box_dims[:, 2]) * fraction)
 
-N = len(box_dims[:, 2])/100
-if N%2 != 0:
-    N-=1
-if N<2 and len(box_dims)>20:
-    N = 10
-else:
-    N = 2
 
 running_avg = np.convolve(box_dims[start:stop, 3], np.repeat(1.0, N)/N, mode='valid')
 thistime2 = (np.arange(len(running_avg))+N/2)*timestep/1000.0
@@ -495,21 +493,21 @@ fig = plt.figure()
 ax = fig.add_subplot(1, 1, 1)
 
 ax.plot(box_dims[start:stop, 0], box_dims[start:stop, 3], "-", color="gray")
-ax.plot(thistime2, running_avg, "-", color=(126/255.0, 49/255.0, 123/255.0))
+ax.plot(thistime2, running_avg, "-", color=(205/255.0, 52/255.0, 181/255.0))
 ax.set_xlabel("time (ns)")
 ax.set_ylabel("z box ($\AA$)")
 #ax.set_ylim([np.min(box_dims[:, 3]), np.max(box_dims[:, 3])])
 ax.set_xlim([0, np.max(thistime)])
 logger.debug(">>> boundaries: %s, %s"%(np.min(box_dims[:, 3]), np.max(box_dims[:, 3])))
 
-fig.savefig("fig_z_box.png")
+fig.savefig("fig_z_box.png", dpi=300, bbox_inches='tight')
 
 
 #2. compare correlation traces of each residue
 logger.debug(">> aggregated correlation evolution per residue...")
 fig = plt.figure(dpi=120, figsize=(8, 8))
 ax = fig.add_subplot(1, 1, 1)
-c = cm.get_cmap("viridis")
+c = matplotlib.colormaps["viridis"]
 mycycle = [c(i) for i in np.linspace(0.0, 1.0, len(all_labels))]
 plt.gca().set_prop_cycle("color", mycycle)
 
@@ -527,75 +525,65 @@ else:
     cols = 1
 
 ax.legend(loc="lower right", ncol=cols, frameon=False)
-fig.savefig("fig_correlation_all_traces_%s_%s.png"%(bins, frames))
+fig.savefig("fig_correlation_all_traces_%s_%s.png"%(bins, frames), dpi=300, bbox_inches='tight')
 
 
 # iterate over each residue selection, for individual plots
 for i in range(len(all_labels)):
 
-        label = all_labels[i]
-        dens = all_dens[i]
-        conv_all = all_ccc[i]
-        conv_trace = all_ccc_traces[i]
+    label = all_labels[i]
+    dens = all_dens[i]
 
-        logger.debug(">> %s time evolution..."%label)
+    dx, dy = np.diff(axes).mean(), np.diff(sampling_time).mean()
+    logger.debug(">> %s time evolution..." % label)
 
-        #3. density vs time surface and cross-correlation
-        fig = plt.figure(dpi=120, figsize=(8, 8))
-        ax = fig.add_subplot(1, 1, 1)
-        ax.set_title(label)
-        X, Y = np.meshgrid(axes, sampling_time)
-        c = cm.get_cmap("viridis")
-        ax.pcolormesh(X, Y, dens, cmap=c)
-        ax.set_xlabel("Box z-binning")
-        ax.set_ylabel("time (ns)")
-        ax.set_xlim([np.min(axes), np.max(axes)])
-        ax.set_ylim([np.min(sampling_time), np.max(sampling_time)])
+    # Calculate levels using MaxNLocator
+    levels = MaxNLocator(nbins=15).tick_values(dens.min(), dens.max())
 
-        # commented below: old routine comparing stepwise PDC with RMSD convergence
-        ## plot pairwise density correlation
-        #N = int(len(conv_trace)/100)
-        #if N%2 != 0:
-        #    N-=1
-        #
-        #CCC_running_avg = np.convolve(conv_trace, np.repeat(1.0, N)/N, mode='valid')
-        #startpos = int(N/2)
-        #thistime3 = sampling_time[startpos:startpos+len(CCC_running_avg)]
-        #
-        #ax2 = fig.add_subplot(1, 2, 2)
-        #ax2.plot(conv_trace, sampling_time[:-1], "gray")
-        #ax2.plot(CCC_running_avg, thistime3, "black")
-        #ax2.set_ylim([np.min(sampling_time[:-1]), np.max(sampling_time[:-1])])
-        #ax2.set_xlim([np.min(conv_trace)*0.995, 1])
-        #ax2.set_yticklabels([])
-        #ax2.set_yticks([])
-        #ax2.set_xlabel("CCC")
-        #
-        ## plot RMSD
-        #ax3 = ax2.twiny()
-        #ax3.plot(rmsd[:, i+1], rmsd[:, 0], color='firebrick')
-        #ax3.set_yticklabels([])
-        #ax3.set_yticks([])
-        #ax3.tick_params('x', colors='firebrick')
-        #ax3.set_xlabel("RMSD ($\AA$)", color='firebrick')
-        #
-        #plt.subplots_adjust(wspace=0)
-        fig.savefig("fig_density_%s_%s_%s.png"%(label, bins, frames))
+    # Associate cmap and norm with chosen colormap and levels
+    cmap = matplotlib.colormaps["viridis"]
+    norm = BoundaryNorm(levels, ncolors=cmap.N, clip=True)
 
-        #4. pairwise cross-correlation
-        Zm = ma.masked_where(conv_all==-1, conv_all)
-        fig = plt.figure(dpi=120, figsize=(8, 8))
-        ax.set_title(label)
-        ax = fig.add_subplot(1, 1, 1)
-        X, Y = np.meshgrid(sampling_time, sampling_time)
-        c = cm.get_cmap("viridis")
-        minccc = max(0.9, np.min(Zm))
-        plt.pcolormesh(X, Y, Zm, cmap=c, vmax=1, vmin=minccc)
-        plt.xlabel("time (ns)")
-        plt.ylabel("time (ns)")
-        plt.colorbar()
+    # 3. density vs time surface and cross-correlation
+    fig, ax = plt.subplots(dpi=120, figsize=(8, 8))
+    ax.set_title(label)
+    X, Y = np.meshgrid(axes[:-1] + dx / 2, sampling_time[:-1] + dy / 2, indexing='ij')
 
-        plt.savefig("fig_PDC_%s_%s_%s.png"%(label, bins, frames))
+    # Adjust X and Y based on the shape of dens
+    X, Y = X[:dens.shape[0], :dens.shape[1]], Y[:dens.shape[0], :dens.shape[1]]
+
+    # Check if X, Y, and dens have the same shape
+    if X.shape != dens.shape or Y.shape != dens.shape:
+        X, Y = np.meshgrid(axes[:dens.shape[1]] + dx / 2, sampling_time[:dens.shape[0]] + dy / 2, indexing='ij')
+
+    # Transpose dens if necessary
+    if X.shape != dens.shape:
+        dens = dens.T
+
+    # Replace pcolormesh with contourf
+    cf = ax.contourf(X, Y, dens, levels=levels, cmap=cmap, norm=norm)
+    ax.set_xlabel("Box z-binning")
+    ax.set_ylabel("time (ns)")
+    ax.set_xlim([np.min(axes), np.max(axes)])
+    ax.set_ylim([np.min(sampling_time), np.max(sampling_time)])
+
+    # Add colorbar for contourf
+    fig.colorbar(cf, ax=ax)
+
+    fig.savefig("fig_density_%s_%s_%s.png" % (label, bins, frames), dpi=300, bbox_inches='tight')
+
+    # 4. pairwise cross-correlation
+    Zm = ma.masked_where(all_ccc[i] == -1, all_ccc[i])
+    fig, ax = plt.subplots(dpi=120, figsize=(8, 8))
+    ax.set_title(label)
+    X, Y = np.meshgrid(sampling_time, sampling_time)
+    minccc = max(0.9, np.min(Zm))
+    plt.pcolormesh(X, Y, Zm, cmap=cmap, vmax=1, vmin=minccc)
+    plt.xlabel("time (ns)")
+    plt.ylabel("time (ns)")
+    plt.colorbar()
+
+    plt.savefig("fig_PDC_%s_%s_%s.png" % (label, bins, frames), dpi=300, bbox_inches='tight')
 
 if display=="yes" or display==True:
     plt.show()
